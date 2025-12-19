@@ -728,4 +728,38 @@ Analysis of Google Trends relative search interest (RSI) and GDELT news volume a
 
 Although this analysis cannot establish causal effects, the results indicate a close connection between news media coverage and public search behaviour, highlighting the importance of media attention in shaping patterns of information seeking. Given that Google searches are frequently one of the first sources people turn to for information and education, understanding these dynamics is particularly important. 
 
+
 While further research is needed to better understand the mechanisms linking media coverage and public search interest, this analysis suggests that news media plays a meaningful role in driving search interest, with potential knock-on implications for public understanding, awareness, and social change.
+
+# Reproducibility
+
+All analyses presented in this report were conducted using R (version 4.5.1) within RStudio.  
+The full analysis workflow, including data acquisition, cleaning, aggregation, visualisation, and statistical modelling, is fully reproducible using the code provided in this repository.
+
+## Data sources
+
+- Google Trends data was retrieved programmatically using the `gtrendsR` package. Due to limitations in reliably querying Google-defined topics via the unofficial API, search terms rather than Knowledge Graph topic identifiers were used. Google Trends data is provided as relative search interest values, normalised within each query.
+- News media data was obtained from the GDELT 2.0 database using the Document API. Daily data were aggregated to weekly resolution to align with Google Trends outputs.
+
+## Reproducibility considerations
+Google Trends and GDELT are dynamic data sources that update continuously. As a result, exact numerical values may differ slightly if the analysis is re-run at a later date. However, the overall temporal patterns and analytical conclusions are expected to remain robust.
+
+All data extraction dates are reported, and all transformations are explicitly documented in the analysis code. No manual data cleaning or undocumented pre-processing steps were performed.
+
+## Software and packages
+Key R packages used in this analysis include:
+
+- `tidyverse`
+- `gtrendsR`
+- `lubridate`
+- `ggplot2`
+- `stats`
+- `rstatix`
+- `lmtest`
+- `sandwich`
+
+
+Session information is provided below to support full reproducibility.
+```{r session-info}
+sessionInfo()
+```
