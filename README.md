@@ -36,5 +36,8 @@ Using **Google Trends** data (via the `gtrendsR` package) and **GDELT** news dat
 ## Notes
 Google Trends data are based on **search terms rather than Google-defined Topics**, due to limitations in reliably querying Knowledge Graph topic identifiers via the `gtrendsR` interface. All analyses focus on temporal dynamics within terms rather than absolute comparisons across topics.
 
+## License
+This repository contains research code and analysis scripts released under the MIT License.
+
 ## Author
 Bek Rengel
