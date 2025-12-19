@@ -1,3 +1,5 @@
+**View the full report (HTML) please visit: https://b-rengel.github.io/capstone_lgbtq_online_visibility/**
+
 # Exploring LGBTQ+ Online Visibility: News Volume and Google Search Interest
 
 This project forms part of the Codecademy Analyse R Skill Path and is the final capstone project required to complete the course.
