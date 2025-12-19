@@ -1,0 +1,731 @@
+---
+title: "Exploring LGBTQ+ online visibility: news volume and Google search interest"
+author: "Bek Rengel"
+date: "2025-12-15"
+output:
+  rmdformats::readthedown:
+    number_sections: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# OVERVIEW
+This project forms part of the Codecademy Analyse R Skill Path and is the final capstone project required to complete the course. The assessment brief asks learners to explore Google Trends using the ```gtrendsR``` package to assess a topic of interest, integrating at least one other dataset with their Google Trends data. The project is designed to demonstrate skills with data extraction and cleaning, statistical analysis, visualisation, and regression modelling. 
+
+In this project, I explore the relationships between UK media coverage and Google search interest for the terms 'transgender' and 'LGBT' between Nov 2020 and Nov 2025. Focusing on the UK only, weekly Google Trends relative search interest (RSI) data was combined with news volume and tone data extracted from the GDELT. Analysis of descriptive statistics, correlation tests, cross-correlation functions, and regression models were used to examine  relationships.
+
+## Key findings
+Findings show that:
+
+- RSI for 'transgender' has a much more erratic trend, suggesting there may be specific drivers influencing RSI spikes (e.g. events, legislation, debates, social media). 
+- For both terms, RSI is correlated with with changes in media volume, and it tends to respond immediately to media volume increases. 
+- Independent of RSI, media volume for both keywords showed short-term lag effects with coverage in one week predicting coverage in the following week. Interestingly, the trans keyword showed medium-term lag effects, showing that media volume from a month ago is still associated with coverage four weeks later.
+- Both terms have strong seasonal patterns that influence RSI, even when accounting for the impact of media volume. Tone does not appear to have a substantial impact on search behaviour. 
+
+Although this analysis cannot demonstrate any causal impacts of media volume on RSI, it does suggest that LGBT+ and trans-related Google search behaviour in the UK is often event-driven and influenced by temporal structures. Further analysis could explore potential explanations for these results and also investigate whether similar trends are observed for other identity-based Google Trends search terms. 
+
+## Limitations
+There are a number of limitations to this analysis:
+
+- Analysis was limited to only two keywords and cannot account for trends for other related topics. I initially tried to extract Google Trends data for Google-defined topics, rather than individual keywords. A topic query would return RSI for any searches that relate to the topic rather that just search terms alone. However, Google-defined topics encoded via Google's Knowledge Graph (/g/...) are inconsistently supported through the ```gtrendsR``` interface and a query for these codes did not produce any results. This analysis was thus limited to exploring the two search terms only. To increase the change of extracting usable data (i.e. no 'NA' or extremely low RSIs) I focued on the terms 'transgender', as 'trans' produces too much noise, and 'LGBT' as this aconym has been in circulation longer than more modern terms like LGBTQIA, LGBTQ+, LGBT+. 
+- Data extracted via gtrends() queries are not absolute counts. Instead values are normalised on a scale from 0-100 where 100 represents peak popularity for the search term in the selected time frame and region. Consequently, an RSI RSI value of 50 would show that the term was half as popular as the peak time.
+- GDELT appears to have no data available for the period 15/06/2025 - 01/07/2025. To check this, I ran a separate query for only that time frame, as well as searching different, unrelated keywords. However, this checking procedure produced no data, suggesting that there was an outage of GDELT coverage over those dates. As a result, these two weeks were removed from the analysis below.
+- There will naturally be overlap between these two areas, particularly given that some trans-related content maybe searched about or written about categorised under 'LGBT+'.
+- GDELT's measurement of tone is purely dictionary based and all data extracted for this analysis showed an overall neutral trend (between -10 and +10), even though findings suggest a negative tone.
+- This analysis is unable to demonstrate causality due to data limitations and the nature of social research data being unable to account for all potential factors that might influence search interest, news article volume, or sentiment. 
+
+---
+
+# PART 1: GOOGLE TRENDS ANALYSIS
+## Data extraction
+Data was extracted via a ```gtrends()``` query using the ```gtrendsR``` package with the following parameters:
+
+- **date range**: 5 years of data from 23 Nov 2025 (date data was extracted). The date range was thus 22 Nov 2020 to 23 Nov 2025.
+- **keywords** were 'LGBT' and 'Transgender'.
+
+``` {r packages}
+library(pacman)
+p_load(dplyr, tidyr, ggplot2, gtrendsR, stats, readr, lubridate, rstatix, lmtest, sandwich)
+```
+
+```{r extracting-gtrends-data}
+trends <- gtrends(keyword = c("LGBT", "Transgender"), geo = "GB", time = "2020-11-22 2025-11-23") # date range matches my original query which was run as time = "today+t-y"
+
+trends_time <- trends$interest_over_time %>%
+  mutate(year = year(date),
+         month = month(date, label = TRUE, abbr = TRUE))
+str(trends_time)
+```
+
+---
+
+## Descriptive statistics
+Mean, standard deviation, and median were computed for each of the topics, broken down by month. 
+
+On average, 'transgender' had slightly higher mean relative search interest (RSI) and much larger standard deviations than 'LGBT'. This suggests there was more variation in RSI week-to-week for the trans search term. 
+```{r mean}
+mean_sd_year <- trends_time %>%
+  group_by(keyword, year) %>%
+  summarise(mean = mean(hits, na.rm = TRUE),
+            sd = sd(hits, na.rm = TRUE),
+            median = median(hits, na.rm = TRUE))
+mean_sd_year
+
+mean_sd_ym <- trends_time %>%
+    group_by(keyword, year, month) %>%
+    summarise(mean = mean(hits, na.rm = TRUE),
+              sd = sd(hits, na.rm = TRUE),
+              median = median(hits, na.rm = TRUE)) %>%
+    mutate(sd_min = mean - sd,
+           sd_max = mean + sd)
+mean_sd_ym
+```
+
+'Transgender' saw notable spikes in mean RSI in Nov 2020, Feb 2023, Jul 2024, and Apr 2025. It is possible that these spikes are related to the following UK-based events, but these connections are untested:
+
+- Nov 2020 coincides with a general rise in activism related to trans identities. This could also potentially be related to Trans Day of Remembrance which falls in Nov each year. 
+- Feb 2023 saw the widely-reported murder of trans teenager Brianna Ghey, as well as debate on the reform of the Gender Recognition Act 2004 in Scotland and subsequent blocking of the reform bill by Westminster. 
+- Jul 2024 saw debates and discussion of legislation that banned the use of puberty blockers by trans individuals under the age of 18, with the UK High Court upholding the legislation following a legal challenge by several claimants at the end of that month. 
+- Apr 2025 spike in RSI is possibly due to the Supreme Court ruling in the For Women Scotland vs The Scottish Ministers case.
+
+These months saw large standard deviations, suggesting that RSI peaked in 1-2 weeks of the month but sharply dropped off for other weeks in the month. 
+
+The 'LGBT' term saw more stable mean RSI but did have notable spikes in Jun of most years, coinciding with what is celebrated in many countries around the world as Pride Month. 
+
+```{r descr-charts}
+monthly_means <- mean_sd_ym %>%
+  ggplot(aes(x = month, y = mean, fill = keyword )) +
+  geom_col(position = "dodge") +
+  geom_errorbar(aes(ymin = sd_min, ymax = sd_max), 
+                position = position_dodge()) +
+  labs(title = "Mean monthly relative search interest for 'LGBT' and 'Transgender' topics on\nGoogle Nov-2020 to Nov-2025 in the UK",
+       subtitle = "Data extracted from Google Trends using gtrendsR package on 22-11-2025",
+       y = "Mean Relative Search Interest",
+       x = "",
+       fill = "Search term") +
+  scale_fill_manual(values = c("#FFC20A", "#0C7BDC")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3)) +
+  facet_wrap(~year)
+monthly_means
+```
+
+---
+
+## Statistical analysis
+T-tests were run to determine if there was a significant difference between mean relative search interest (RSI) for each search term. Overall the slightly higher mean RSI observed in the 'transgender' search term was found to be statistically significant.
+
+Levene's test was first run to test for equal variance. No significant difference in variance was observed between the terms, satisfying the assumption of equal variances of a two-sample t-test. 
+
+```{r t-test}
+levene <- levene_test(hits ~ keyword, data = trends_time)
+levene
+
+t_test <- t.test(hits ~ keyword, data = trends_time, var.equal = TRUE)
+t_test
+```
+
+---
+
+## Time series analysis
+To understand temporal patterns, I plotted RSI over time, as well as conducting linear regression to understand seasonal trends.  
+
+### Plotting RSI over time
+Overall, 'LGBT' saw a gradual downwards trend from Nov 2020 to Nov 2025. Conversely, the trans term showed a much more erratic trend with more spikes. 
+
+```{r time-gtrends-chart}
+time_chart <- trends_time %>%
+  ggplot(aes(x = date, y= hits, colour = keyword)) +
+  geom_line() +
+  labs(title = "Relative search interest for 'LGBT' and 'Transgender' topics on Google\nNov-2020 to Nov-2025 in the UK",
+       subtitle = "Data extracted from Google Trends using gtrendsR package on 23-11-2025",
+       x = "",
+       y = "Relative search interest",
+       colour = "Search term") +
+  scale_x_date(breaks = "1 year",
+               date_labels = ("%Y")) +
+  theme_minimal()+
+  scale_colour_manual(values = c("#FFC20A", "#0C7BDC"))
+time_chart
+```
+
+### Linear regression modelling
+Linear regression was run to determine temporal and seasonal effects. Month was encoded using orthogonal polynomial contrasts and models were fit for each keyword. Two models were fitted for each search term:
+
+- Model 1: RSI as a function of year to understand the effect of change between years in predicting changes in RSI
+- Model 2: RSI as a function of year and month to model seasonal variation and understand how in-year changes can predict RSI changes. 
+
+RSI is bounded between 0 and 100, which may violate linearity assumptions. Therefore, results of this regression should be interpreted descriptively rather than as precise effect sizes. 
+
+**'Transgender' search term**
+
+Model 1 showed that there were no statistically significant annual effects on RSI.
+
+Model 2 found evidence of a seasonal pattern in RSI. The largest effect was a clear, significant linear pattern denoting that some months were consistently higher in RSI and others lower in a roughly straight-line trend. Some of the higher order polynomials were also significant suggesting smaller ups and downs in specific months. However the R2 for this model was relatively low, suggesting that there are other factors unaccounted for that are influencing RSI. 
+
+**'LGBT' search term**
+
+Model 1 found a statistically significant year-on-year decline in RSI. However, the R2 for the model was relatively low, suggesting that there are other factors influencing RSI.
+
+Model 2 found very strong evidence of seasonal variation, with a large increase in R2, suggesting that adding month as a predictor greatly increased the predictive ability of this model for this search term. The linear component was highly significant indicating a consistent linear difference between early-year RSI and later-year RSI. The quadratic component was also highly significant, suggesting that the seasonal pattern has a broad curved shape rather than being purely linear. Several higher-order polynomials were also significant, indicating additional bends and curves across the year. Overall, this suggests that 'LGBT' RSI follows a strongly seasonal pattern with multiple rises and dips throughout the year, rather than a single peak or trough. 
+
+
+```{r time-linear}
+lm_trans <- lm(hits ~ year, data = subset(trends_time, keyword == "Transgender"))
+summary(lm_trans)
+
+lm_trans_month <- lm(hits ~ year + month, data = subset(trends_time, keyword == "Transgender"))
+summary(lm_trans_month)
+
+lm_lgbt <- lm(hits ~ year, data = subset(trends_time, keyword == "LGBT"))
+summary(lm_lgbt)
+
+lm_lgbt_month <- lm(hits ~ year + month, data = subset(trends_time, keyword == "LGBT"))
+summary(lm_lgbt_month)
+```
+
+---
+
+# PART 2: GDELT DATA ANALYSIS
+## Data extraction
+Data was extracted from GDELT using an API, extracting the following data for each search term:
+
+- Volume: number of articles in the specified region that mention the keyword as well as the number of total articles available in GDELT for that day and region.
+- Tone: average sentiment for all articles in that region and on that day that mention the keyword, measured on a scale from 0-100.
+
+Note: GDELT's tone measure is dictionary-based, using Lexicoder for political discourse, and values are scaled by word count. Scores are then averaged across all articles in a day. GDELT tone ranges from -100 (all words are negative) to +100 (all words are positive) but most news will be neutral, falling between -10 and +10. Because GDELT's tone measurement is purely based on dictionary meanings, it cannot take into account nuanced measures of sentiment or language features like sarcasm.
+
+GDELT queries provide data for each day in the specified date range. To be comparable to Google Trends data, I aggregated GDELT data by week which increases the possibility that day-to-day fluctuations may be masked through this aggregation.
+
+```{r volume-data}
+#------------ url elements -----------------------------------
+base_url <- "https://api.gdeltproject.org/api/v2/doc/doc"
+
+query_trans <- "transgender"
+query_lgbt  <- "LGBT"
+
+start <- "20201122000000"  # 22 Nov 2020
+end   <- "20251123000000"  # 23 Nov 2025, final day of Gtrends query
+
+#------------ building urls ----------------------------------
+url_trans_vol <- paste0(
+  base_url,
+  "?query=", URLencode(query_trans, reserved = TRUE),
+  "&mode=TimelineVolRaw",
+  "&startdatetime=", start,
+  "&enddatetime=", end,
+  "&sourcecountry=GB",
+  "&format=csv"
+)
+
+url_lgbt_vol <- paste0(
+  base_url,
+  "?query=", URLencode(query_lgbt, reserved = TRUE),
+  "&mode=TimelineVolRaw",
+  "&startdatetime=", start,
+  "&enddatetime=", end,
+  "&sourcecountry=GB",
+  "&format=csv"
+)
+
+#------------ extracting data -------------------------------
+gdelt_trans_vol <- read.csv(url_trans_vol)
+gdelt_lgbt_vol  <- read.csv(url_lgbt_vol)
+
+#---------- cleaning - trans --------------------------------
+gdelt_trans_vol <- gdelt_trans_vol %>%
+  pivot_wider(names_from = Series,
+              values_from = Value)
+colnames(gdelt_trans_vol) [2] <- "count_articles"
+colnames(gdelt_trans_vol) [3] <- "total_articles"
+gdelt_trans_vol$Date <- as.Date(trimws(as.character(gdelt_trans_vol$Date)), format = "%Y-%m-%d")
+str(gdelt_trans_vol)
+
+gdelt_trans_vol_week <- gdelt_trans_vol %>%
+  mutate(week = floor_date(Date, unit = "week", week_start = 7)) %>%
+  group_by(week) %>%
+  summarise(
+    weekly_count = sum(count_articles, na.rm = TRUE),
+    weekly_total = sum(total_articles, na.rm = TRUE),
+    weekly_proportion = weekly_count / weekly_total * 100) %>%
+  mutate(year = year(week),
+         month = month(week, label = TRUE, abbr = TRUE),
+         keyword = "Transgender")
+str(gdelt_trans_vol_week)
+
+#------------- cleaning - LGBT -------------------------
+gdelt_lgbt_vol <- gdelt_lgbt_vol %>%
+  pivot_wider(names_from = Series,
+              values_from = Value)
+colnames(gdelt_lgbt_vol) [2] <- "count_articles"
+colnames(gdelt_lgbt_vol) [3] <- "total_articles"
+
+gdelt_lgbt_vol$Date <- as.Date(trimws(as.character(gdelt_lgbt_vol$Date)), format = "%Y-%m-%d")
+str(gdelt_lgbt_vol)
+
+gdelt_lgbt_vol_week <- gdelt_lgbt_vol %>%
+  mutate(week = floor_date(Date, unit = "week", week_start = 7)) %>%
+  group_by(week) %>%
+  summarise(
+    weekly_count = sum(count_articles, na.rm = TRUE),
+    weekly_total = sum(total_articles, na.rm = TRUE),
+    weekly_proportion = weekly_count / weekly_total * 100) %>%
+  mutate(year = year(week),
+         month = month(week, label = TRUE, abbr = TRUE),
+         keyword = "LGBT")
+str(gdelt_lgbt_vol_week)
+
+#--------------- combining -----------------------------
+gdelt_vol_comb <- gdelt_trans_vol_week %>%
+  rbind(gdelt_lgbt_vol_week)
+head(gdelt_vol_comb, 10)
+```
+
+```{r tone-data}
+# Note: base URL elements are the same as used in the chunk above to extract volume data. 
+#---------- building urls --------------------------------
+url_trans_tone <- paste0(
+  base_url,
+  "?query=", URLencode(query_trans, reserved = TRUE),
+  "&mode=TimelineTone",
+  "&startdatetime=", start,
+  "&enddatetime=", end,
+  "&sourcecountry=GB",
+  "&format=csv"
+)
+url_lgbt_tone <- paste0(
+  base_url,
+  "?query=", URLencode(query_lgbt, reserved = TRUE),
+  "&mode=TimelineTone",
+  "&startdatetime=", start,
+  "&enddatetime=", end,
+  "&sourcecountry=GB",
+  "&format=csv"
+)
+
+#---------- extracting data -----------------------------
+gdelt_trans_tone <- read.csv(url_trans_tone)
+gdelt_lgbt_tone <- read.csv(url_lgbt_tone)
+
+#---------- cleaning - trans ---------------------------
+str(gdelt_trans_tone)
+colnames(gdelt_trans_tone)[2] <- "sentiment"
+colnames(gdelt_trans_tone)[3] <- "sentiment_value"
+gdelt_trans_tone$Date <- as.Date(gdelt_trans_tone$Date)
+
+gdelt_trans_tone <- gdelt_trans_tone %>%
+  mutate(week = floor_date(Date, unit = "week", week_start = 7)) %>%
+  mutate(year = year(Date),
+         month = month(Date, label = TRUE, abbr = TRUE))
+
+gdelt_trans_tone_week <- gdelt_trans_tone %>%
+  group_by(week) %>%
+  summarise(
+    week_avg_sentiment = mean(sentiment_value)) %>%
+  mutate(week = floor_date(week, unit = "week", week_start = 7)) %>%
+  mutate(year = year(week),
+         month = month(week, label = TRUE, abbr = TRUE),
+         keyword = "Transgender")
+str(gdelt_trans_tone_week)
+
+#--------- cleaning - LGBT -------------------------------
+str(gdelt_lgbt_tone)
+colnames(gdelt_lgbt_tone)[2] <- "sentiment"
+colnames(gdelt_lgbt_tone)[3] <- "sentiment_value"
+gdelt_lgbt_tone$Date <- as.Date(gdelt_lgbt_tone$Date)
+
+gdelt_lgbt_tone <- gdelt_lgbt_tone %>%
+  mutate(week = floor_date(Date, unit = "week", week_start = 7)) %>%
+  mutate(year = year(Date),
+         month = month(Date, label = TRUE, abbr = TRUE))
+
+gdelt_lgbt_tone_week <- gdelt_lgbt_tone %>%
+  group_by(week) %>%
+  summarise(
+    week_avg_sentiment = mean(sentiment_value)) %>%
+  mutate(week = floor_date(week, unit = "week", week_start = 7)) %>%
+  mutate(year = year(week),
+         month = month(week, label = TRUE, abbr = TRUE),
+         keyword = "LGBT")
+str(gdelt_lgbt_tone_week)
+
+#---------- combining ----------------------------------
+gdelt_tone_comb <- gdelt_trans_tone_week %>%
+  rbind(gdelt_lgbt_tone_week)
+head(gdelt_tone_comb, 10)
+```
+
+---
+
+## Descriptive statistics
+Descriptive statistics (mean, standard deviation, min, max) were computed for both search terms and for both volume and tone.
+
+Overall, the 'transgender' search term had a higher mean volume of articles compared to 'LGBT', with relatively large standard deviations. 'LGBT' also saw a graduate decrease in mean volume over time.
+
+```{r volume-descriptives}
+vol_mean_sd <- gdelt_vol_comb %>%
+  group_by(keyword, year, month) %>%
+  summarise(
+    mean_prop = mean(weekly_proportion),
+    sd_prop = sd(weekly_proportion),
+    mean_count = mean(weekly_count),
+    sd_count = sd(weekly_count),
+    mean_total = mean(weekly_total),
+    sd_total = sd(weekly_total)) %>%
+  mutate(sd_max_prop = mean_prop + sd_prop,
+         sd_min_prop = mean_prop - sd_prop,
+         sd_max_count = mean_count + sd_count,
+         sd_min_count = mean_count - sd_count)
+
+monthly_vol_means <- vol_mean_sd %>%
+  ggplot(aes(x = month, y = mean_count, fill = keyword )) +
+  geom_col(position = "dodge") +
+  geom_errorbar(aes(ymin = sd_min_count, ymax = sd_max_count), 
+                position = position_dodge()) +
+  facet_wrap(~year) +
+  labs(title = "Mean monthly news articles for 'LGBT' and 'Transgender' topics on GDELT Nov-2020 to Nov-2025 in the UK",
+       subtitle = "Data extracted via GDELT API on 23-11-2025",
+       y = "Mean monthly count of articles",
+       x = "",
+       fill = "Search term") +
+  scale_fill_manual(values = c("#FFC20A", "#0C7BDC")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3))
+monthly_vol_means
+```
+
+Tone for the trans term showed overall lower sentiment than for 'LGBT', with no means or standard deviations rising above 0 from 2021 onwards. However, both search terms had no articles with an monthly mean tone above 0 but some months had large standard deviations, indicating that some weeks were much more positive than others. 
+
+GDELT tone is purely dictionary based and cannot account for linguistic features like sarcasm or social aspects like social media comments. Although all sentiment is negative, it is still within GDELT's boundaries for neutral language. 
+
+```{r tone-descriptives}
+tone_mean_sd <- gdelt_tone_comb %>%
+  group_by(keyword, year, month) %>%
+  summarise(
+    mean_sentiment = mean(week_avg_sentiment),
+    sd_sentiment = sd(week_avg_sentiment)) %>%
+  mutate(sd_max = mean_sentiment + sd_sentiment,
+         sd_min = mean_sentiment - sd_sentiment,
+         direction = ifelse(mean_sentiment >= 0, "Positive", "Negative"))
+
+monthly_tone_means <- tone_mean_sd %>%
+  ggplot(aes(x = month, y = mean_sentiment, fill = direction)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = sd_min, ymax = sd_max), 
+                position = position_dodge()) +
+  facet_grid(keyword ~ year) +
+  labs(title = "Mean sentiment value for news articles relating to trans and LGBT+ topics on GDELT from Nov-2020 to Nov-2025",
+       subtitle = "Data extracted via GDELT API on 23-11-2025",
+       y = "Mean sentiment value",
+       x = "") +
+  scale_x_discrete(labels = c(Jan = "Jan",
+                              Feb = "",
+                              Mar = "",
+                              Apr = "Apr",
+                              May = "",
+                              Jun = "",
+                              Jul = "Jul",
+                              Aug = "",
+                              Sep = "",
+                              Oct = "Oct",
+                              Nov = "",
+                              Dec = "")) +
+  scale_fill_manual(values = c("Positive" = "green3", "Negative" = "red4")) +
+  scale_y_continuous(limits = c(2, -4)) +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3),
+        legend.position = "none")
+monthly_tone_means
+```
+
+---
+
+# PART 3: COMBINING GOOGLE TRENDS AND GDELT DATA
+Google Trends data and GDELT data extracted and analysed above were combined to conduct a more nuanced analysis, addressing the following evaluation questions:
+
+1. How do RSI and volume change over time and is there any visual connection between them? What about RSI and tone?
+2. Do media volume spikes correlate with search interest spikes?
+3. Do changes in tone correlate with search interest changes?
+4. Do media volume and/or tone have any predictive effect on measuring RSI? 
+5. Can we detect lag between media volume and RSI?
+
+To analyse these questions, I created a combined data frame that brought together Google Trends and GDELT data. When examining the data, I noticed that GDELT had missing data from 15-06-2025 to 01-07-2025, as outlined in the 'Limitations' section above. These weeks were filtered out of the combined data frame. 
+
+```{r combined-df}
+trans_full_df <- trends_time %>%
+  filter(keyword == "Transgender") %>%
+  mutate(week = as.Date(date)) %>%
+  select(week, hits) %>%
+  left_join(gdelt_trans_vol_week, by = "week") %>%
+  select(-year, -month, -keyword) %>%
+  left_join(gdelt_trans_tone_week)
+str(trans_full_df)
+
+lgbt_full_df <- trends_time %>%
+  filter(keyword == "LGBT") %>%
+  mutate(week = as.Date(date)) %>%
+  select(week, hits) %>%
+  left_join(gdelt_lgbt_vol_week, by = "week") %>%
+  select(-year, -month, -keyword) %>%
+  left_join(gdelt_lgbt_tone_week)
+str(lgbt_full_df)
+
+full_data <- trans_full_df %>%
+  rbind(lgbt_full_df)
+
+full_data_clean <- full_data %>%
+  filter(!is.na(weekly_count)) %>%
+  arrange(keyword, week)
+head(full_data_clean, 10)
+```
+
+## Visual trends: RSI and volume, RSI and tone
+Relative search interest (RSI) on Google was plotted against media volume, and against media tone, to see if any visual relationships or trends could be observed between them. This required scaling volume/tone to match the RSI axis. 
+
+Volume saw the following trends:
+
+- For 'LGBT', RSI remained relatively steady whereas media volume dropped off around mid-2023.
+- 'Transgender' showed a more erratic pattern for both RSI and media volume with more spikes and dips over time.
+
+```{r RSI-volume}
+time_volume <- full_data_clean %>%
+  ggplot(aes(x = week)) +
+  geom_line(aes(y = hits, colour = "RSI")) +
+  geom_line(aes(y = weekly_count / max(weekly_count) * 100,
+                colour = "Volume (scaled)")) +
+  scale_y_continuous(
+    name = "Google Trends RSI",
+    sec.axis = sec_axis(~ .,
+                        name = "Media Volume (scaled 0–100)")
+  ) +
+  labs(title = "Weekly relative search interest (RSI) compared to media volume of articles\nfrom Nov-2020 to Nov-2025",
+       subtitle = "Data extracted via Googe Trends and GDELT on 23-11-2025",
+       colour = "Metric") +
+  theme_minimal() +
+  facet_wrap(~keyword,  nrow = 2, ncol = 1)
+time_volume
+```
+
+Conversely, mapping RSI against tone revealed no particularly clear trends observable between RSI and tone. For both terms, tone remained relatively steady over time, with a handful of notable dips. Interestingly, the 'trans' term saw a very small overall decline in tone from late 2020 to early 2022. 
+
+```{r RSI-tone}
+time_series_tone <- full_data_clean %>% 
+  ggplot(aes(x = week)) +
+  geom_line(aes(y = hits, colour = "RSI")) +
+  geom_line(aes(y = (week_avg_sentiment + 5) * 10,
+                colour = "Tone (scaled)")) +
+  scale_y_continuous(
+    name = "Google Trends RSI",
+    sec.axis = sec_axis(~ .,
+                        name = "Media tone (scaled)")
+  ) +
+  labs(title = "Weekly relative search interest (RSI) compared to media tone of articles\nfrom Nov-2020 to Nov-2025",
+       subtitle = "Data extracted via Googe Trends and GDELT on 23-11-2025",
+       colour = "Metric") +
+  theme_minimal() +
+  facet_wrap(~keyword, nrow = 2, ncol = 1)
+time_series_tone
+```
+
+---
+
+## Correlation between media volume and RSI
+The correlation between media volume (weekly count of articles) and RSI (hits) was computed using both Spearman's Rho and Kendall's Tau B, following a significant Shapiro Wilks test. Spearman's Rho was initially used but due to ties, Kendall's Tau B was preferred.
+
+For both search terms, there was a strong positive correlation between media volume and RSI that was statistically significant. This suggests that for both keywords, when media volume increases, RSI also tends to increase. However, these results are exploratory and do not control for potential confounding factors such as seasonality or media volume.
+
+Plotting both search terms visually showed that the 'transgender' search term had many more outliers and overall showed a less linear relationship compared to 'LGBT'.
+
+```{r cor-media-RSI}
+shapiro.test(trans_full_df$weekly_count) # p<0.001
+shapiro.test(trans_full_df$hits) # p<0.001
+shapiro.test(lgbt_full_df$hits) #p<0.001
+shapiro.test(lgbt_full_df$weekly_count) #p<0.001
+
+cor.test(trans_full_df$hits, trans_full_df$weekly_count, method = "spearman")
+cor.test(trans_full_df$hits, trans_full_df$weekly_count, method = "kendall")
+
+cor.test(lgbt_full_df$hits, lgbt_full_df$weekly_count, method = "spearman")
+cor.test(lgbt_full_df$hits, lgbt_full_df$weekly_count, method = "kendall")
+
+scatter_vol <- full_data_clean %>%
+  ggplot(aes(x = hits, y = weekly_count, colour = keyword)) +
+  geom_point() +
+  geom_smooth(method = "auto")+
+  labs(title = "Relationship between average number of articles and relative search interest\non 'Transgender' and 'LGBT+'\ntopics on Google Nov-2020 to Nov-2025 in the UK",
+       subtitle = "Data extracted via Googe Trends and GDELT on 23-11-2025",
+       y = "Number of articles (weekly)",
+       x = "Relative Search Interest",
+       colour = "Topic") +
+  scale_colour_manual(values = c("#FFC20A", "#0C7BDC")) +
+  theme_minimal()
+scatter_vol
+```
+
+## Correlation between tone and search interest
+The correlation between tone and RSI (hits) was computed using:
+
+- 'Transgender' search term: both Spearman's Rho and Kendall's Tau B, following a significant Shapiro Wilks test. Spearman's Rho was initially used but due to ties, Kendall's Tau B was preferred.
+- 'LGBT' search term: Pearson's r test was used following a non-significant Shapiro Wilks test. 
+
+Analysis of the trans topic showed no statistically significant correlation between tone and search interest, suggesting there is no strong association between tone and RSI. Conversely, the LGBT topic showed a small, statistically significant negative relationship, suggesting that when one increases the other decreases. 
+
+However, overall tone does not appear to have a particularly strong relationship to RSI.
+
+These results are exploratory and do not control for potential confounding factors such as seasonality or media volume. Additional, unaccounted-for factors could be masking a potential association between these variables. 
+
+```{r }
+shapiro.test(trans_full_df$week_avg_sentiment) #p<0.001
+shapiro.test(lgbt_full_df$week_avg_sentiment) #p=0.172
+
+cor.test(trans_full_df$hits, trans_full_df$week_avg_sentiment, method = "spearman")
+cor.test(trans_full_df$hits, trans_full_df$week_avg_sentiment, method = "kendall")
+
+cor.test(lgbt_full_df$hits, lgbt_full_df$week_avg_sentiment, method = "pearson")
+         
+scatter_tone <- full_data_clean %>%
+  ggplot(aes(x = hits, y = week_avg_sentiment, colour = keyword)) +
+  geom_point() +
+  geom_smooth(method = "auto")+
+  labs(title = "Relationship between average weekly sentiment of news articles and relative\nsearch interest on 'Transgender' and 'LGBT+'topics on Google Nov-2020 to Nov-2025 in the UK",
+       subtitle = "Data extracted via Googe Trends and GDELT on 23-11-2025",
+       y = "Average weekly sentiment",
+       x = "Relative Search Interest",
+       legend = "Topic") +
+  scale_colour_manual(values = c("#FFC20A", "#0C7BDC")) +
+  theme_minimal()
+scatter_tone
+```
+
+---
+
+## Regression modelling volume and tone as predictive factors
+Linear regression was used to model media volume as a function of relative search interest (RSI) to understand if any relationship could be observed between these, particularly any predictive effect. I then added tone as an additional predictor to check the impact it had on search interest. Finally, I added month as a predictor to understand seasonal impacts.
+
+For the trans search term I found that:
+
+- There was small but significant effect of news volume on RSI, with increases in news volume being associated with small increases in RSI. However, this model had a relatively low R2, suggesting that there are other factors driving search interest, and/or that the relationship is not linear. This model also did not control for seasonal or lagged effects.
+- When adding tone as an additional predictor, I found that it has no predictive value producing a small, non-significant coefficient with a high standard error. The model's R2 also showed almost not change suggesting that tone added no additional explanatory value. 
+- Finally, I found that when adding month as a predictor, R2 improved slightly. The lower order polynomial contrasts (linear, quadratic, cubic) were not significant, but higher order polynomial relationships were. This suggests that there is a relatively complex seasonal structure affecting RSI when accounting for media volume. 
+
+Overall, these findings suggest that for the 'transgender' term, RSI has an association with media volume as well as exhibiting complex seasonal patterns. 
+
+```{r trans-lm}
+simple_trans_model <- lm(hits ~ weekly_count, data = subset(full_data_clean, keyword == "Transgender"))
+summary(simple_trans_model)
+
+tone_trans_model <- lm(hits ~ weekly_count + week_avg_sentiment, data = subset(full_data_clean, keyword == "Transgender"))
+summary(tone_trans_model)
+
+trans_model_month <- lm(hits ~ weekly_count + month, data = subset(full_data_clean, keyword == "Transgender"))
+summary(trans_model_month)
+```
+
+For 'LGBT':
+
+- There was a small but significant relationship where increases in news volume showed small increases in RSI. The R2 for this model was much higher than for the equivalent model for'transgender'. This appears to suggest that LGBT search behaviour is partly driven by news cycles.
+- Tone appeared to be a significant predictor in models without seasonal controls. However, adding seasonality to the previous model found that when accounting for seasonal variation, tone loses its predictive power, indicating that the apparent effects were largely driven by seasonal structure rather than sentiment. This suggests that, overall, tone does not have a substantial affect on RSI when controlling for media volume. 
+- Seasonality strongly influences RSI, with RSI declining on average across Jan to Dec with a roughly linear trend. This trend had more complexity as both the quadratic and several higher-order polynomials saw significant effects suggesting a complex but highly structured seasonal cycle affecting RSI when media volume and tone are held constant. 
+
+Overall this suggests that RSI is affected by a highly structured seasonal cycle, and that media volume and RSI are associated. 
+
+```{r lgbt-lm}
+simple_lgbt_model <- lm(hits ~ weekly_count, data = subset(full_data_clean, keyword == "LGBT"))
+summary(simple_lgbt_model)
+
+tone_lgbt_model <- lm(hits ~ weekly_count + week_avg_sentiment, data = subset(full_data_clean, keyword == "LGBT"))
+summary(tone_lgbt_model)
+
+lgbt_model_month <- lm(hits ~ weekly_count + week_avg_sentiment +month, data = subset(full_data_clean, keyword == "LGBT"))
+summary(lgbt_model_month)
+```
+
+---
+
+## Lag: media volume and RSI
+Several tests were run to determine the effect of media lag i.e. does a spike in media volume precede a rise in RSI or vice versa. Often in news cycles, an increase in reporting on a story will bring about an increase in interest shortly after.
+
+Tests run included:
+
+- Cross-correlation function to measure the similarity of volume and RSI at different lags.
+- Distributed Lag Modelling to account for lags when modelling the behaviour of volume and RSI.
+
+### Cross-correlation
+Cross-correlation function (CCF) measures the similarity between two time series at different lags and is commonly used to investigate whether changes in one series precede changes in another over time. Cross-correlation can be computed regardless of the data distribution because it is defined in terms of covariance and expectations rather than distributional assumptions.
+
+Autocorrelation and trends can affect the interpretation offered by CCF so it is used as a useful exploratory tool to understand the temporal alignment of volume and RSI rather than to make solid conclusions on the relationship between them.
+
+A maximum lag of 12 weeks was chosen as this represents a quarter of the year, allowing me to capture short-term media attention while avoiding over-interpreting longer-term correlations.
+
+CCF of the trans term found that:
+
+- RSI and media volume were moderately correlated at lag 0. Small-to-moderate correlations also occurred at negative lags (-1 to -6 weeks) indicating that increases in search behaviour commonly preceded increases in UK media coverage.
+- There were some small correlations at positive lags (1-2 weeks) suggesting that media reporting sometimes led to a subsequent increase in RSI. 
+
+CCF of 'LGBT' found:
+
+- A strong symmetric pattern centered around lag 0, suggesting that RSI and media volume tend to rise and fall in relatively similar time periods. 
+- There were substantial, steady positive correlations at negative lags (-1 to -10 weeks) suggesting that increases in search interest often precede increases in news volume. However, there were also some correlations at positive lags (1-10 weeks) suggesting that news reporting can precede later increases in public searches. 
+- Overall, this topic appeared to have a strong bidirectional relationship. 
+
+Overall, CCF suggests that for both topics there is a trend of search interest often preceding increases in news volume, suggesting a pattern where public attention builds in domains such as social media or events before receiving mainstream news coverage. However, this analysis is illustrative of a general trend and does not control for potential confounding or explanatory effects, necessitating the need for further tests. 
+
+```{r ccf}
+trans_ccf <- full_data_clean %>%
+  filter(keyword == "Transgender")
+ccf(trans_ccf$weekly_count, trans_ccf$hits, lag.max = 12, plot = TRUE)
+
+lgbt_ccf <- full_data_clean %>%
+  filter(keyword == "LGBT")
+ccf(lgbt_ccf$weekly_count, lgbt_ccf$hits, lag.max = 12, plot = TRUE)
+```
+
+### Distributed Lag Modelling
+Distributed Lag Model (DLM) is a type of regression used to understand how one variable effects another when the effect does not happen immediately but unfolds over several time periods (lags). It allows the assessment of both immediate and delayed associations.
+
+Following results observed in CCF, I ran DLM to further understand the impact of lags on the relationship between media volume and RSI. I explored two different models, one to understand the relationship between RSI and media volume (both immediate and lagged), the other to understand the relationship between media volume, lagged media volume influencing current coverage, and RSI. I used the Newey-West estimator to account for autocorrelation in the second model.
+
+Lags of up to 6 weeks were used to measure short-term changes, as CCF results primarily showed strong correlations within this time range, particularly for the trans search term.
+
+DLM for 'transgender' found that:
+
+- Lags in news coverage did not predict future RSI when accounting for media volume, suggesting that public search behaviour responds mostly to immediate events rather than delayed media effects.
+- However, modeling media volume predicted by a combination of search interest and media momentum over time found that when RSI is high, we also see more news coverage suggesting that Google search interest and news media often move together. 
+- Furthermore, independent of Google search interest, media volume had a very short-term effect (lag 1), suggesting it has its own momentum over very short span of time with coverage in one week predicting coverage the following week. This is to be expected as often news media will report on similar issues, with stories being successively picked up by different outlets, and journalists will often follow up on previous stories. 
+- Interestingly, there was also evidence of medium-term effects at lag 4, suggesting that media volume from a month ago is still associated with coverage four weeks later when accounting for RSI and the previous week's coverage. This could be reflecting monthly political cycles, legal timelines, follow-up reporting, and editorial scheduling.
+
+Similarly for the LGBT search term:
+
+- DLM showed that search interest appears to respond immediately to media volume but shows no evidence of delayed effects when accounting for media coverage in the same week. 
+- For the LGBT+ topic, higher RSI was also associated with increased news coverage in the same week, suggesting that search interest and media volume often move together. 
+- Independent of search interest, media volume showed  short-term effects (lag 1-2), with coverage in one week predicting coverage in the following week, reflecting expected journalistic and editorial momentum. In contrast to the trans keyword, no medium-term lagged effects were observed for LGBT+ coverage after correcting for autocorrelation, suggesting that media attention to LGBT+ topics is more short-lived and less structured over time. 
+
+This analysis overall showed that for both, there is a immediate-term association between media volume and search interest, with both search terms showing short-term momentum for media volume. In addition, trans search terms are more likely to also have medium-term momentum, suggesting that media attention has more complex patterns for this topic.
+
+```{r dlm}
+trans_dlm <- lm(hits ~ weekly_count + lag(weekly_count, 1) + lag(weekly_count, 2) + lag(weekly_count, 3) + lag(weekly_count, 4) + lag(weekly_count, 5) + lag(weekly_count, 6), data = subset(full_data_clean, keyword == "Transgender"))
+summary(trans_dlm)
+trans_dlm2 <- lm(weekly_count ~ hits + lag(weekly_count, 1) + lag(weekly_count, 2) + lag(weekly_count, 3) + lag(weekly_count, 4) + lag(weekly_count, 5) + lag(weekly_count, 6), data = subset(full_data_clean, keyword == "Transgender"))
+summary(trans_dlm2)
+
+coeftest(trans_dlm2, vcov. = NeweyWest(trans_dlm2, lag = 6))
+
+lgbt_dlm <- lm(hits ~ weekly_count + lag(weekly_count, 1) + lag(weekly_count, 2) + lag(weekly_count, 3) + lag(weekly_count, 4) + lag(weekly_count, 5) + lag(weekly_count, 6), data = subset(full_data_clean, keyword == "LGBT"))
+summary(lgbt_dlm)
+lgbt_dlm2 <- lm(weekly_count ~ hits + lag(weekly_count, 1) + lag(weekly_count, 2) + lag(weekly_count, 3) + lag(weekly_count, 4) + lag(weekly_count, 5) + lag(weekly_count, 6), data = subset(full_data_clean, keyword == "LGBT"))
+summary(lgbt_dlm2)
+
+coeftest(lgbt_dlm2, vcov. = NeweyWest(lgbt_dlm2, lag = 6))
+```
+
+---
+
+# CONCLUSIONS
+Analysis of Google Trends relative search interest (RSI) and GDELT news volume and tone data for keywords 'LGBT' and 'transgender' showed persistent seasonal patterns and a strong association between news coverage and search interest. These findings suggests that LGBT+ and trans-related search behaviour in the UK is often event-driven and influenced by recurring temporal structures, including monthly political, legislative, and journalistic cycles. 
+
+Although this analysis cannot establish causal effects, the results indicate a close connection between news media coverage and public search behaviour, highlighting the importance of media attention in shaping patterns of information seeking. Given that Google searches are frequently one of the first sources people turn to for information and education, understanding these dynamics is particularly important. 
+
+While further research is needed to better understand the mechanisms linking media coverage and public search interest, this analysis suggests that news media plays a meaningful role in driving search interest, with potential knock-on implications for public understanding, awareness, and social change.
